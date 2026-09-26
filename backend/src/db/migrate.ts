@@ -57,11 +57,54 @@ const createTables = async (): Promise<void> => {
         star_level INTEGER NOT NULL CHECK (star_level >= 1 AND star_level <= 5),
         badge_name VARCHAR(100) NOT NULL,
         description TEXT,
+        status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked')),
         awarded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        revoked_at TIMESTAMP,
+        revoke_reason VARCHAR(200),
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(volunteer_id, star_level)
       );
 
       CREATE INDEX IF NOT EXISTS idx_badges_volunteer_id ON badges(volunteer_id);
+      CREATE INDEX IF NOT EXISTS idx_badges_status ON badges(volunteer_id, status);
+    `);
+
+    // 兼容已存在的旧库：补齐徽章生命周期字段
+    await client.query(`
+      ALTER TABLE badges ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'active';
+      ALTER TABLE badges ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMP;
+      ALTER TABLE badges ADD COLUMN IF NOT EXISTS revoke_reason VARCHAR(200);
+      ALTER TABLE badges ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+      UPDATE badges SET status = 'active' WHERE status IS NULL;
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'badges_status_check') THEN
+          ALTER TABLE badges
+            ADD CONSTRAINT badges_status_check CHECK (status IN ('active', 'revoked'));
+        END IF;
+      END $$;
+      CREATE INDEX IF NOT EXISTS idx_badges_status ON badges(volunteer_id, status);
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS badge_events (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        volunteer_id UUID NOT NULL REFERENCES volunteers(id) ON DELETE CASCADE,
+        badge_id UUID REFERENCES badges(id) ON DELETE SET NULL,
+        star_level INTEGER NOT NULL CHECK (star_level >= 1 AND star_level <= 5),
+        event_type VARCHAR(20) NOT NULL CHECK (event_type IN ('awarded', 'revoked', 'reawarded')),
+        reason VARCHAR(200) NOT NULL,
+        points_before INTEGER,
+        points_after INTEGER,
+        level_before INTEGER,
+        level_after INTEGER,
+        related_id UUID,
+        related_type VARCHAR(50),
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_badge_events_volunteer_id ON badge_events(volunteer_id);
+      CREATE INDEX IF NOT EXISTS idx_badge_events_created_at ON badge_events(created_at DESC);
     `);
 
     await client.query(`
@@ -151,6 +194,11 @@ const createTables = async (): Promise<void> => {
       DROP TRIGGER IF EXISTS update_service_records_updated_at ON service_records;
       CREATE TRIGGER update_service_records_updated_at
         BEFORE UPDATE ON service_records
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+      DROP TRIGGER IF EXISTS update_badges_updated_at ON badges;
+      CREATE TRIGGER update_badges_updated_at
+        BEFORE UPDATE ON badges
         FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
     `);
 

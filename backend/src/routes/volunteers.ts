@@ -9,6 +9,7 @@ import {
   getVolunteerPointsLogs,
   getVolunteerCreditLogs,
   getVolunteerSummary,
+  getVolunteerBadgeHistoryLogs,
 } from '../services/volunteerManager';
 import { getVolunteerBadges } from '../services/badgeService';
 import { messages } from '../constants/messages';
@@ -64,6 +65,18 @@ router.get('/:id/badges', async (req: Request, res: Response) => {
     res.status(200).json({ success: true, data: badges });
   } catch (error) {
     sendInternalError(res, error, 'Error getting volunteer badges');
+  }
+});
+
+router.get('/:id/badge-history', validateQuery(paginationSchema), async (req: Request, res: Response) => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const pageSize = parseInt(req.query.page_size as string) || 20;
+    const result = await getVolunteerBadgeHistoryLogs(req.params.id, page, pageSize);
+    const statusCode = result.success ? 200 : 404;
+    res.status(statusCode).json(result);
+  } catch (error) {
+    sendInternalError(res, error, 'Error getting volunteer badge history');
   }
 });
 

@@ -1,5 +1,6 @@
 import { Volunteer, ApiResponse, PaginatedData } from '../types';
 import pool from '../db/pool';
+import { getVolunteerBadgeHistory as fetchBadgeHistory } from './badgeService';
 import { messages } from '../constants/messages';
 
 export const createVolunteer = async (
@@ -238,6 +239,37 @@ export const getVolunteerCreditLogs = async (
   }
 };
 
+export const getVolunteerBadgeHistoryLogs = async (
+  volunteerId: string,
+  page: number = 1,
+  pageSize: number = 20
+): Promise<ApiResponse<any>> => {
+  const client = await pool.connect();
+
+  try {
+    const volunteerResult = await client.query(
+      'SELECT id FROM volunteers WHERE id = $1',
+      [volunteerId]
+    );
+
+    if (volunteerResult.rows.length === 0) {
+      return { success: false, error: messages.volunteers.notFound };
+    }
+
+    const { events, pagination } = await fetchBadgeHistory(volunteerId, page, pageSize);
+
+    return {
+      success: true,
+      data: {
+        events,
+        pagination,
+      },
+    };
+  } finally {
+    client.release();
+  }
+};
+
 export const getVolunteerSummary = async (
   volunteerId: string
 ): Promise<ApiResponse<any>> => {
@@ -256,7 +288,9 @@ export const getVolunteerSummary = async (
     const volunteer = volunteerResult.rows[0];
 
     const badgesResult = await client.query(
-      'SELECT * FROM badges WHERE volunteer_id = $1 ORDER BY star_level',
+      `SELECT * FROM badges
+       WHERE volunteer_id = $1 AND status = 'active'
+       ORDER BY star_level`,
       [volunteerId]
     );
 

@@ -77,7 +77,35 @@ export interface Badge {
   star_level: number;
   badge_name: string;
   description: string;
+  status: 'active' | 'revoked';
   awarded_at: Date;
+  revoked_at?: Date;
+  revoke_reason?: string;
+  updated_at?: Date;
+}
+
+export type BadgeEventType = 'awarded' | 'revoked' | 'reawarded';
+
+export interface BadgeEvent {
+  id: string;
+  volunteer_id: string;
+  badge_id?: string;
+  star_level: number;
+  event_type: BadgeEventType;
+  reason: string;
+  points_before?: number;
+  points_after?: number;
+  level_before?: number;
+  level_after?: number;
+  related_id?: string;
+  related_type?: string;
+  created_at: Date;
+}
+
+export interface BadgeSyncResult {
+  awarded: Badge[];
+  revoked: Badge[];
+  events: BadgeEvent[];
 }
 
 export interface Complaint {
@@ -157,7 +185,9 @@ export interface CreateServiceRecordResult {
   newTotalPoints: number;
   newLevel: number;
   newBadges: any[];
+  revokedBadges: any[];
   levelUp: boolean;
+  levelDown: boolean;
   creditScore: number;
   creditChange: number;
   creditBreakdown?: CreditCalculationBreakdown;

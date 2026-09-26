@@ -2,7 +2,7 @@ import { ApiResponse, Complaint, ComplaintWithCredit, CreditScoreResult } from '
 import pool from '../db/pool';
 import { calculateComplaintPenalty } from './pointsCalculator';
 import { logCreditChange, recalculateCreditScore } from './creditService';
-import { calculateLevel, checkNewBadges } from './badgeService';
+import { calculateLevel, syncBadgesToLevel } from './badgeService';
 import { logger } from '../utils/logger';
 import { messages } from '../constants/messages';
 
@@ -198,6 +198,8 @@ export const handleComplaint = async (
 
     const volunteer = volunteerResult.rows[0];
 
+    const oldTotalPoints = volunteer.total_points;
+    const oldLevel = calculateLevel(oldTotalPoints);
     const newTotalPoints = Math.max(0, volunteer.total_points - pointsPenalty);
     const newLevel = calculateLevel(newTotalPoints);
 
@@ -213,6 +215,16 @@ export const handleComplaint = async (
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [volunteer.id, -pointsPenalty, `投诉处理扣分: ${complaint.complaint_type}`, volunteer.total_points, newTotalPoints, complaintId, 'complaint']
     );
+
+    const badgeSync = await syncBadgesToLevel(client, volunteer.id, {
+      newLevel,
+      reason: `投诉处理扣分: ${complaint.complaint_type}`,
+      pointsBefore: oldTotalPoints,
+      pointsAfter: newTotalPoints,
+      levelBefore: oldLevel,
+      relatedId: complaintId,
+      relatedType: 'complaint',
+    });
 
     await client.query(
       `UPDATE complaints
@@ -256,6 +268,10 @@ export const handleComplaint = async (
         pointsPenalty,
         newTotalPoints,
         newLevel,
+        levelUp: newLevel > oldLevel,
+        levelDown: newLevel < oldLevel,
+        newBadges: badgeSync.awarded,
+        revokedBadges: badgeSync.revoked,
         creditScore: creditResult?.afterScore,
         creditChange: creditResult?.changeAmount,
         creditBreakdown: creditResult?.breakdown,

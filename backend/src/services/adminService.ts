@@ -1,6 +1,6 @@
 import { ApiResponse } from '../types';
 import pool from '../db/pool';
-import { calculateLevel, checkNewBadges } from './badgeService';
+import { calculateLevel, syncBadgesToLevel } from './badgeService';
 import { logCreditChange } from './creditService';
 import { isCreditLimited } from './creditService';
 import { logger } from '../utils/logger';
@@ -47,16 +47,14 @@ export const adjustPoints = async (
       [volunteerId, pointsChange, `管理员调整: ${reason}`, oldTotalPoints, newTotalPoints, 'admin_adjust']
     );
 
-    let newBadges: any[] = [];
-    let levelUp = false;
-    if (newLevel > oldLevel) {
-      const currentBadges = await client.query(
-        'SELECT * FROM badges WHERE volunteer_id = $1',
-        [volunteerId]
-      );
-      newBadges = await checkNewBadges(volunteerId, newLevel, currentBadges.rows);
-      levelUp = true;
-    }
+    const badgeSync = await syncBadgesToLevel(client, volunteerId, {
+      newLevel,
+      reason: `管理员调整积分: ${reason}`,
+      pointsBefore: oldTotalPoints,
+      pointsAfter: newTotalPoints,
+      levelBefore: oldLevel,
+      relatedType: 'admin_adjust',
+    });
 
     await client.query(
       `INSERT INTO admin_audit_logs (admin_id, action, target_type, target_id, old_value, new_value, reason)
@@ -77,8 +75,10 @@ export const adjustPoints = async (
         newTotalPoints,
         oldLevel,
         newLevel,
-        levelUp,
-        newBadges,
+        levelUp: newLevel > oldLevel,
+        levelDown: newLevel < oldLevel,
+        newBadges: badgeSync.awarded,
+        revokedBadges: badgeSync.revoked,
       },
     };
   } catch (error) {

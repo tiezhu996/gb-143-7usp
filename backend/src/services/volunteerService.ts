@@ -1,7 +1,7 @@
-import { Volunteer, ServiceRecord, PointsLog, ApiResponse, CreateServiceRecordResult } from '../types';
+import { Volunteer, ServiceRecord, ApiResponse, CreateServiceRecordResult } from '../types';
 import pool from '../db/pool';
 import { calculatePoints, calculateNoShowPenalty } from './pointsCalculator';
-import { calculateLevel, checkNewBadges } from './badgeService';
+import { calculateLevel, syncBadgesToLevel } from './badgeService';
 import { logCreditChange, isCreditLimited, CREDIT_LIMIT_THRESHOLD, recalculateCreditScore } from './creditService';
 import { logger } from '../utils/logger';
 import { messages } from '../constants/messages';
@@ -95,14 +95,16 @@ export const createServiceRecord = async (record: ServiceRecord): Promise<ApiRes
       ]
     );
 
-    let newBadges: any[] = [];
-    if (newLevel > oldLevel) {
-      const currentBadges = await client.query(
-        'SELECT * FROM badges WHERE volunteer_id = $1',
-        [volunteer.id]
-      );
-      newBadges = await checkNewBadges(volunteer.id, newLevel, currentBadges.rows);
-    }
+    const badgeSync = await syncBadgesToLevel(client, volunteer.id, {
+      newLevel,
+      reason: record.is_no_show ? '爽约扣分' : `完成服务: ${record.service_type}`,
+      pointsBefore: oldTotalPoints,
+      pointsAfter: newTotalPoints,
+      levelBefore: oldLevel,
+      relatedId: newRecord.id,
+      relatedType: 'service_record',
+    });
+    const newBadges = badgeSync.awarded;
 
     await client.query('COMMIT');
 
@@ -127,7 +129,9 @@ export const createServiceRecord = async (record: ServiceRecord): Promise<ApiRes
         newTotalPoints,
         newLevel,
         newBadges,
+        revokedBadges: badgeSync.revoked,
         levelUp: newLevel > oldLevel,
+        levelDown: newLevel < oldLevel,
         creditScore: creditResult ? creditResult.afterScore : volunteer.credit_score,
         creditChange: creditResult ? creditResult.changeAmount : 0,
         creditBreakdown: creditResult?.breakdown,
@@ -262,6 +266,8 @@ export const deleteServiceRecord = async (
     if (volunteerResult.rows.length > 0) {
       const volunteer = volunteerResult.rows[0] as Volunteer;
       const pointsToDeduct = record.points_earned || 0;
+      const oldTotalPoints = volunteer.total_points;
+      const oldLevel = volunteer.level;
       const newTotalPoints = Math.max(0, volunteer.total_points - pointsToDeduct);
       const newLevel = calculateLevel(newTotalPoints);
 
@@ -277,6 +283,16 @@ export const deleteServiceRecord = async (
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [volunteer.id, -pointsToDeduct, `管理员删除记录: ${reason}`, volunteer.total_points, newTotalPoints, recordId, 'admin_delete']
       );
+
+      await syncBadgesToLevel(client, volunteer.id, {
+        newLevel,
+        reason: `管理员删除记录: ${reason}`,
+        pointsBefore: oldTotalPoints,
+        pointsAfter: newTotalPoints,
+        levelBefore: oldLevel,
+        relatedId: recordId,
+        relatedType: 'admin_delete',
+      });
     }
 
     await client.query('DELETE FROM service_records WHERE id = $1', [recordId]);
