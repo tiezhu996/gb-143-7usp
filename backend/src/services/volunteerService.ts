@@ -1,7 +1,7 @@
 import { Volunteer, ServiceRecord, PointsLog, ApiResponse, CreateServiceRecordResult } from '../types';
 import pool from '../db/pool';
 import { calculatePoints, calculateNoShowPenalty } from './pointsCalculator';
-import { calculateLevel, checkNewBadges } from './badgeService';
+import { calculateLevel, checkNewBadges, revokeBadgesAboveLevel } from './badgeService';
 import { logCreditChange, isCreditLimited, CREDIT_LIMIT_THRESHOLD, recalculateCreditScore } from './creditService';
 import { logger } from '../utils/logger';
 import { messages } from '../constants/messages';
@@ -96,12 +96,20 @@ export const createServiceRecord = async (record: ServiceRecord): Promise<ApiRes
     );
 
     let newBadges: any[] = [];
+    let revokedBadges: any[] = [];
     if (newLevel > oldLevel) {
       const currentBadges = await client.query(
-        'SELECT * FROM badges WHERE volunteer_id = $1',
+        'SELECT * FROM badges WHERE volunteer_id = $1 AND revoked_at IS NULL',
         [volunteer.id]
       );
-      newBadges = await checkNewBadges(volunteer.id, newLevel, currentBadges.rows);
+      newBadges = await checkNewBadges(volunteer.id, newLevel, currentBadges.rows, client);
+    } else if (newLevel < oldLevel) {
+      revokedBadges = await revokeBadgesAboveLevel(
+        volunteer.id,
+        newLevel,
+        record.is_no_show ? '爽约扣分' : `服务积分变动: ${record.service_type}`,
+        client
+      );
     }
 
     await client.query('COMMIT');
@@ -127,6 +135,7 @@ export const createServiceRecord = async (record: ServiceRecord): Promise<ApiRes
         newTotalPoints,
         newLevel,
         newBadges,
+        revokedBadges,
         levelUp: newLevel > oldLevel,
         creditScore: creditResult ? creditResult.afterScore : volunteer.credit_score,
         creditChange: creditResult ? creditResult.changeAmount : 0,
@@ -259,6 +268,8 @@ export const deleteServiceRecord = async (
       [record.volunteer_id]
     );
 
+    let revokedBadges: any[] = [];
+
     if (volunteerResult.rows.length > 0) {
       const volunteer = volunteerResult.rows[0] as Volunteer;
       const pointsToDeduct = record.points_earned || 0;
@@ -271,6 +282,15 @@ export const deleteServiceRecord = async (
          WHERE id = $3`,
         [newTotalPoints, newLevel, volunteer.id]
       );
+
+      if (newLevel < volunteer.level) {
+        revokedBadges = await revokeBadgesAboveLevel(
+          volunteer.id,
+          newLevel,
+          `管理员删除记录: ${reason}`,
+          client
+        );
+      }
 
       await client.query(
         `INSERT INTO points_logs (volunteer_id, change_amount, reason, before_points, after_points, related_id, related_type)
@@ -305,11 +325,14 @@ export const deleteServiceRecord = async (
     return {
       success: true,
       message: messages.volunteers.serviceRecordDeleted,
-      data: creditResult ? {
-        creditScore: creditResult.afterScore,
-        creditChange: creditResult.changeAmount,
-        creditBreakdown: creditResult.breakdown,
-      } : undefined,
+      data: {
+        revokedBadges,
+        ...(creditResult ? {
+          creditScore: creditResult.afterScore,
+          creditChange: creditResult.changeAmount,
+          creditBreakdown: creditResult.breakdown,
+        } : {}),
+      },
     };
   } catch (error) {
     await client.query('ROLLBACK');

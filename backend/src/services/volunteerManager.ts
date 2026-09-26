@@ -256,7 +256,7 @@ export const getVolunteerSummary = async (
     const volunteer = volunteerResult.rows[0];
 
     const badgesResult = await client.query(
-      'SELECT * FROM badges WHERE volunteer_id = $1 ORDER BY star_level',
+      'SELECT * FROM badges WHERE volunteer_id = $1 AND revoked_at IS NULL ORDER BY star_level',
       [volunteerId]
     );
 

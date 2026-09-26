@@ -78,6 +78,8 @@ export interface Badge {
   badge_name: string;
   description: string;
   awarded_at: Date;
+  revoked_at?: Date | null;
+  revoke_reason?: string | null;
 }
 
 export interface Complaint {
@@ -157,6 +159,7 @@ export interface CreateServiceRecordResult {
   newTotalPoints: number;
   newLevel: number;
   newBadges: any[];
+  revokedBadges?: any[];
   levelUp: boolean;
   creditScore: number;
   creditChange: number;

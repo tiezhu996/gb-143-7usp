@@ -58,10 +58,17 @@ const createTables = async (): Promise<void> => {
         badge_name VARCHAR(100) NOT NULL,
         description TEXT,
         awarded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(volunteer_id, star_level)
+        revoked_at TIMESTAMP,
+        revoke_reason VARCHAR(200)
       );
 
+      ALTER TABLE badges ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMP;
+      ALTER TABLE badges ADD COLUMN IF NOT EXISTS revoke_reason VARCHAR(200);
+      ALTER TABLE badges DROP CONSTRAINT IF EXISTS badges_volunteer_id_star_level_key;
+
       CREATE INDEX IF NOT EXISTS idx_badges_volunteer_id ON badges(volunteer_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_badges_active_star_level
+        ON badges(volunteer_id, star_level) WHERE revoked_at IS NULL;
     `);
 
     await client.query(`

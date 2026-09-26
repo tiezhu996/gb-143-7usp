@@ -10,7 +10,7 @@ import {
   getVolunteerCreditLogs,
   getVolunteerSummary,
 } from '../services/volunteerManager';
-import { getVolunteerBadges } from '../services/badgeService';
+import { getVolunteerBadges, getVolunteerBadgeHistory } from '../services/badgeService';
 import { messages } from '../constants/messages';
 import { sendBadRequest, sendInternalError } from '../utils/httpResponses';
 
@@ -64,6 +64,15 @@ router.get('/:id/badges', async (req: Request, res: Response) => {
     res.status(200).json({ success: true, data: badges });
   } catch (error) {
     sendInternalError(res, error, 'Error getting volunteer badges');
+  }
+});
+
+router.get('/:id/badge-history', async (req: Request, res: Response) => {
+  try {
+    const history = await getVolunteerBadgeHistory(req.params.id);
+    res.status(200).json({ success: true, data: history });
+  } catch (error) {
+    sendInternalError(res, error, 'Error getting volunteer badge history');
   }
 });
 

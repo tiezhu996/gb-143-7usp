@@ -2,7 +2,7 @@ import { ApiResponse, Complaint, ComplaintWithCredit, CreditScoreResult } from '
 import pool from '../db/pool';
 import { calculateComplaintPenalty } from './pointsCalculator';
 import { logCreditChange, recalculateCreditScore } from './creditService';
-import { calculateLevel, checkNewBadges } from './badgeService';
+import { calculateLevel, revokeBadgesAboveLevel } from './badgeService';
 import { logger } from '../utils/logger';
 import { messages } from '../constants/messages';
 
@@ -208,6 +208,13 @@ export const handleComplaint = async (
       [newTotalPoints, newLevel, volunteer.id]
     );
 
+    const revokedBadges = await revokeBadgesAboveLevel(
+      volunteer.id,
+      newLevel,
+      `投诉处理扣分: ${complaint.complaint_type}`,
+      client
+    );
+
     await client.query(
       `INSERT INTO points_logs (volunteer_id, change_amount, reason, before_points, after_points, related_id, related_type)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
@@ -256,6 +263,7 @@ export const handleComplaint = async (
         pointsPenalty,
         newTotalPoints,
         newLevel,
+        revokedBadges,
         creditScore: creditResult?.afterScore,
         creditChange: creditResult?.changeAmount,
         creditBreakdown: creditResult?.breakdown,

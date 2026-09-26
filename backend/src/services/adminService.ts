@@ -1,6 +1,6 @@
 import { ApiResponse } from '../types';
 import pool from '../db/pool';
-import { calculateLevel, checkNewBadges } from './badgeService';
+import { calculateLevel, checkNewBadges, revokeBadgesAboveLevel } from './badgeService';
 import { logCreditChange } from './creditService';
 import { isCreditLimited } from './creditService';
 import { logger } from '../utils/logger';
@@ -48,14 +48,22 @@ export const adjustPoints = async (
     );
 
     let newBadges: any[] = [];
+    let revokedBadges: any[] = [];
     let levelUp = false;
     if (newLevel > oldLevel) {
       const currentBadges = await client.query(
-        'SELECT * FROM badges WHERE volunteer_id = $1',
+        'SELECT * FROM badges WHERE volunteer_id = $1 AND revoked_at IS NULL',
         [volunteerId]
       );
-      newBadges = await checkNewBadges(volunteerId, newLevel, currentBadges.rows);
+      newBadges = await checkNewBadges(volunteerId, newLevel, currentBadges.rows, client);
       levelUp = true;
+    } else if (newLevel < oldLevel) {
+      revokedBadges = await revokeBadgesAboveLevel(
+        volunteerId,
+        newLevel,
+        `管理员调整: ${reason}`,
+        client
+      );
     }
 
     await client.query(
@@ -79,6 +87,7 @@ export const adjustPoints = async (
         newLevel,
         levelUp,
         newBadges,
+        revokedBadges,
       },
     };
   } catch (error) {
